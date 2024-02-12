@@ -1,7 +1,7 @@
 # Understanding Neural Networks with PyTorch
 This repository houses a comprehensive collection of Jupyter notebooks designed to complement Andrej Karpathy's neural networks walkthrough. Spanning a diverse spectrum of topics, these notebooks serve as invaluable resources for exploring the foundational concepts and practical application of neural networks.
 
-Within the MicroGrad directory, foundational concepts such as gradient understanding, backpropagation, and neural network training are covered. Additionally, practical applications extend to training diverse natural language models from basic Bigram models to advanced transformers.
+Foundational concepts such as gradient understanding, backpropagation, and neural network training are covered. Additionally, practical applications extend to training diverse natural language models from basic Bigram models to advanced transformers.
 ## Foundational Concepts: Understanding Gradients and Backpropagation
 Notebooks within the MicroGrad directory, cover the foundational concepts such as gradient flow understanding, backpropagation, and neural network training.
 
