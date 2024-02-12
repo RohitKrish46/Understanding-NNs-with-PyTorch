@@ -5,7 +5,7 @@ Within the MicroGrad directory, foundational concepts such as gradient understan
 ## Foundational Concepts: Understanding Gradients and Backpropagation
 Notebooks within the MicroGrad directory, cover the foundational concepts such as gradient flow understanding, backpropagation, and neural network training.
 
-All related notebooks are under the directory [MicroGrad_Walkthrough](./MicroGrad).
+All related notebooks are under the directory [MicroGrad](./MicroGrad).
  
  
 ## Practical Applications and Understanding PyTorch
@@ -13,7 +13,7 @@ To understand the intricacies and challenges that one faces while building neura
 
 This character-level model is trained on a dataset of names to predict innovative and cool new names. While exploring the walkthrough, he also helped me gain a deeper knowledge of the PyTorch framework and how it operates under the hood for all foundational concepts.
 
-All related notebooks are under the directory [Makemore_Walkthrough](./Makemore).
+All related notebooks are under the directory [Makemore](./Makemore).
  
 
 ## Related Papers
