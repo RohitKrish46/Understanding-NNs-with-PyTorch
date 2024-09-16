@@ -1,7 +1,15 @@
 from dataclasses import dataclass
+import sys
+import math
+import time
 import torch
+import tiktoken
+import warnings
+import torch._dynamo
 import torch.nn as nn
 from torch.nn import functional as F
+warnings.filterwarnings("ignore")
+torch._dynamo.config.suppress_errors = True
 
 class CausalSelfAttention(nn.Module):
 
@@ -28,10 +36,16 @@ class CausalSelfAttention(nn.Module):
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         y = F.scaled_dot_product_attention(q, k, v, is_causal=True) # flash attention
+        
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
         # output projection
         y = self.c_proj(y)
         return y
+    
+class TanhGELU(nn.Module):
+    def forward(self, input):
+        return 0.5 * input * (1.0 + torch.tanh(math.sqrt(2.0/math.pi) * (input + 0.044715 * torch.pow(input, 3.0))))
+
 
 class MLP(nn.Module):
 
@@ -180,7 +194,7 @@ max_length = 30
 
 
 # prefix tokens
-import tiktoken
+
 
 class DataLoaderLite:
     def __init__(self, B, T):
@@ -208,7 +222,7 @@ class DataLoaderLite:
             self.current_position = 0
         return x, y
 
-import time
+
 torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
@@ -216,7 +230,7 @@ if torch.cuda.is_available():
 train_loader = DataLoaderLite(B=16, T=1024)
 torch.set_float32_matmul_precision('high') #tensorfloat32 instead of float 32
 
-model = GPT(GPTConfig())
+model = GPT(GPTConfig(vocab_size=50304))
 model.to('cuda')
 model = torch.compile(model)
 
@@ -239,7 +253,7 @@ for i in range(50):
 
 
 
-import sys; sys.exit(0)
+sys.exit(0)
 
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
