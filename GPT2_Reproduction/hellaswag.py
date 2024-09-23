@@ -163,7 +163,7 @@ def evaluate(model_type, device):
         if num_total < 10:
             print("---")
             print(f"Context:\n {example['ctx']}")
-            print(f"Endings:")
+            print("Endings:")
             for i, end in enumerate(example["endings"]):
                 print(f"{i} (loss: {avg_loss[i].item():.4f}) {end}")
             print(f"predicted: {pred_norm}, actual: {label}")
