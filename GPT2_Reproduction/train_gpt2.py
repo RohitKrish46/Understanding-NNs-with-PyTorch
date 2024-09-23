@@ -14,6 +14,8 @@ from torch.nn import functional as F
 warnings.filterwarnings("ignore")
 torch._dynamo.config.suppress_errors = True
 
+
+device = 'cuda'
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config):
@@ -242,23 +244,13 @@ class DataLoaderLite:
         self.shards = shards
         assert len(shards) > 0, f"no shards found in split {split}"
         print(f"found {len(shards)} shards for split {split}")
+        self.reset()
 
+    def reset(self):
         # state, init at shard zero
         self.current_shard = 0
         self.tokens = load_tokens(self.shards[self.current_shard])
         self.current_position = self.B * self.T
-
-        # # at init load tokens from disk and store them in memory
-        # with open('input.txt', 'r') as f:
-        #     text = f.read()
-        # enc = tiktoken.get_encoding('gpt2') 
-        # tokens = enc.encode(text)
-        # self.tokens = torch.tensor(tokens)
-        # print(f"loaded {len(self.tokens)} tokens")
-        # print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
-
-        # # state
-        # self.current_position = 0
 
     def next_batch(self):
         B, T = self.B, self.T
@@ -278,6 +270,8 @@ torch.manual_seed(1337)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(1337)
 
+enc = tiktoken.get_encoding("gpt2")
+
 total_batch_size = 524288 # ~0.5 M, in number of tokens
 B = 8 # mini batch size
 T = 1024 # sequence length
@@ -289,11 +283,13 @@ print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
 
 
 train_loader = DataLoaderLite(B=8, T=1024, split='train')
+val_loader = DataLoaderLite(B=B, T=T, split='val')
+
 torch.set_float32_matmul_precision('high') #tensorfloat32 instead of float 32
 
 model = GPT(GPTConfig(vocab_size=50304))
 model.to('cuda')
-model = torch.compile(model)
+#model = torch.compile(model)
 
 # max_lr = 6e-4
 # min_lr = max_lr * 0.1
@@ -326,6 +322,58 @@ optimizer = model.configure_optimizers(weight_decay=0.1, learning_rate=6e-4, dev
 
 for step in range(max_steps):
     t0 = time.time()
+    # once in a while evaluate our validation loss
+    if step % 100 == 0:
+        model.eval()
+        val_loader.reset()
+        with torch.no_grad():
+            val_loss_accum = 0.0
+            val_loss_steps = 20
+            for _ in range(val_loss_steps):
+                x, y = val_loader.next_batch()
+                x, y = x.to(device), y.to(device)
+                with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
+                    logits, loss = model(x, y)
+                loss = loss / val_loss_steps
+                val_loss_accum += loss.detach()
+
+        print(f"validation loss: {val_loss_accum.item():.4f}")
+
+    # once in a while generate from model
+    if step > 0 and step % 100 == 0:
+        model.eval()
+        num_return_sequences = 4
+        max_length = 32
+        tokens = enc.encode("Hello!, I'm a language model,")
+        tokens = torch.tensor(tokens,dtype=torch.long)
+        tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1)
+        xgen = tokens.to(device)
+        sample_rng = torch.Generator(device=device)
+        sample_rng.manual_seed(42)
+        while xgen.size(1) < max_length:
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+            # forward the model and get logits
+                with torch.no_grad():
+                    logits, loss = model(xgen)
+                    # get logits at last position
+                    logits = logits[:, -1, :]
+                    # get probability
+                    probs = F.softmax(logits, dim=-1)
+                    # top-k sampling
+                    topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
+                    # select a token fro topk
+                    ix = torch.multinomial(topk_probs, 1, generator=sample_rng)
+                    # gather corresponding indices
+                    xcol = torch.gather(topk_indices, -1, ix)
+                    # append to the sequence
+                    xgen = torch.cat((xgen, xcol), dim=-1)
+            # print generated text
+        for i in range(num_return_sequences):
+            tokens = xgen[i, :max_length].tolist()
+            decoded = enc.decode(tokens)
+            print(f"sample {i}: {decoded}")
+
+    model.train()
     optimizer.zero_grad()
     loss_accum = 0.0
     for micro_step in range(grad_accum_steps):
@@ -353,29 +401,3 @@ for step in range(max_steps):
 
 
 sys.exit(0)
-
-torch.manual_seed(42)
-torch.cuda.manual_seed(42)
-
-# x is of shape (Batch, Time)
-while x.size(1) < max_length:
-    # no need for torch.backward on any of the below code (no caching)
-    with torch.no_grad():
-        logits = model(x)
-        # get the logits for last position
-        logits = logits[:, -1, :]
-        # get the probabilities
-        probs = F.softmax(logits, dim=-1)
-        # do a top k sampling of 50
-        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
-        # select a token from those top 50
-        ix = torch.multinomial(topk_probs, 1)
-        # gather corresponding indices
-        xcol = torch.gather(topk_indices, -1, ix)
-        # append to the sequence
-        x = torch.cat((x, xcol), dim=-1)
-
-# for i in range(num_return_sequences):
-#     tokens = x[i, :max_length].tolist()
-#     decoded = enc.decode(tokens)
-#     print(">", decoded)
