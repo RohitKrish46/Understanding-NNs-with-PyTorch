@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+import os
 import sys
 import math
 import time
@@ -7,7 +7,9 @@ import inspect
 import tiktoken
 import warnings
 import torch._dynamo
+import numpy as np
 import torch.nn as nn
+from dataclasses import dataclass
 from torch.nn import functional as F
 warnings.filterwarnings("ignore")
 torch._dynamo.config.suppress_errors = True
@@ -219,22 +221,44 @@ max_length = 30
 
 #model = GPT.from_pretrained('gpt2')
 
-# prefix tokens
+def load_tokens(filename):
+    npt = np.load(filename)
+    ptt = torch.tensor(npt, dtype=torch.long)
+    return ptt
+
+
 class DataLoaderLite:
-    def __init__(self, B, T):
+    def __init__(self, B, T, split):
         self.B = B
         self.T = T
-        # at init load tokens from disk and store them in memory
-        with open('input.txt', 'r') as f:
-            text = f.read()
-        enc = tiktoken.get_encoding('gpt2') 
-        tokens = enc.encode(text)
-        self.tokens = torch.tensor(tokens)
-        print(f"loaded {len(self.tokens)} tokens")
-        print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+        assert split in {'train', 'val'}
 
-        # state
-        self.current_position = 0
+        # data root
+        data_root = "edu_fineweb10B"
+        shards = os.listdir(data_root)
+        shards = [s for s in shards if split in s]
+        shards = sorted(shards)
+        shards = [os.path.join(data_root, s) for s in shards]
+        self.shards = shards
+        assert len(shards) > 0, f"no shards found in split {split}"
+        print(f"found {len(shards)} shards for split {split}")
+
+        # state, init at shard zero
+        self.current_shard = 0
+        self.tokens = load_tokens(self.shards[self.current_shard])
+        self.current_position = self.B * self.T
+
+        # # at init load tokens from disk and store them in memory
+        # with open('input.txt', 'r') as f:
+        #     text = f.read()
+        # enc = tiktoken.get_encoding('gpt2') 
+        # tokens = enc.encode(text)
+        # self.tokens = torch.tensor(tokens)
+        # print(f"loaded {len(self.tokens)} tokens")
+        # print(f"1 epoch = {len(self.tokens) // (B * T)} batches")
+
+        # # state
+        # self.current_position = 0
 
     def next_batch(self):
         B, T = self.B, self.T
@@ -243,7 +267,9 @@ class DataLoaderLite:
         y = (buf[1:]).view(B, T)
         self.current_position +=  B * T
         if self.current_position + (B * T + 1) > len(self.tokens):
-            self.current_position = 0
+            self.current_shard = (self.current_shard + 1) % len(self.shards)
+            self.tokens = load_tokens(self.shards[self.current_shard])
+            self.current_position = B * T
         return x, y
 
 #device_type = "cuda" if device.startswith("cuda") else "cpu"
@@ -262,17 +288,22 @@ print(f"=> calculated gradient accumulation steps: {grad_accum_steps}")
  
 
 
-train_loader = DataLoaderLite(B=8, T=1024)
+train_loader = DataLoaderLite(B=8, T=1024, split='train')
 torch.set_float32_matmul_precision('high') #tensorfloat32 instead of float 32
 
 model = GPT(GPTConfig(vocab_size=50304))
 model.to('cuda')
 model = torch.compile(model)
 
+# max_lr = 6e-4
+# min_lr = max_lr * 0.1
+# warmup_steps = 10
+# max_steps = 50
+
 max_lr = 6e-4
 min_lr = max_lr * 0.1
-warmup_steps = 10
-max_steps = 50
+warmup_steps = 715
+max_steps = 19073
 
 def get_lr(it):
     
